@@ -1,0 +1,11 @@
+How to use:
+
+Copy the file migrate_from_trac.rake in the directory lib/tasks, overwriting the original file.
+
+Use the description of migration from the site: http://www.redmine.org/wiki/redmine/RedmineMigrate#Trac
+Additionally, for the migration of svn, use the command:
+
+rake redmine:migrate_from_trac_svn RAILS_ENV="production"
+
+Additional information is on the link:
+http://www.redmine.org/issues/5035
