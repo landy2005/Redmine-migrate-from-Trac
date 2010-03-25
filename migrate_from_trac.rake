@@ -19,12 +19,6 @@ require 'active_record'
 require 'iconv'
 require 'pp'
 
-require 'redmine/scm/adapters/abstract_adapter'
-require 'redmine/scm/adapters/subversion_adapter'
-require 'rexml/document'
-require 'uri'
-require 'tempfile'
-
 namespace :redmine do
   desc 'Trac migration script'
   task :migrate_from_trac => :environment do
@@ -302,11 +296,10 @@ namespace :redmine do
         wiki_edit_count = 0
 
         # Components
-        print "Migrating components"
+        who = "Migrating components"
         issues_category_map = {}
+        components_total = TracComponent.count
         TracComponent.find(:all).each do |component|
-        print '.'
-        STDOUT.flush
           c = IssueCategory.new :project => @target_project,
                                 :name => encode(component.name[0, limit_for(IssueCategory, 'name')])
         #Owner
@@ -316,16 +309,16 @@ namespace :redmine do
         next unless c.save
         issues_category_map[component.name] = c
         migrated_components += 1
+        simplebar(who, migrated_components, components_total)
         end
-        puts
+        puts if migrated_components < components_total
 
         # Milestones
-        print "Migrating milestones"
+        who = "Migrating milestones"
         version_map = {}
         milestone_wiki = Array.new
+        milestones_total = TracMilestone.count
         TracMilestone.find(:all).each do |milestone|
-          print '.'
-          STDOUT.flush
           # First we try to find the wiki page...
           p = wiki.find_or_new_page(milestone.name.to_s)
           p.content = WikiContent.new(:page => p) if p.new_record?
@@ -344,16 +337,17 @@ namespace :redmine do
           version_map[milestone.name] = v
           milestone_wiki.push(milestone.name);
           migrated_milestones += 1
+          simplebar(who, migrated_milestones, milestones_total)
         end
-        puts
+        puts if migrated_milestones < milestones_total
 
         # Custom fields
         # TODO: read trac.ini instead
-        print "Migrating custom fields"
+        #print "Migrating custom fields"
         custom_field_map = {}
         TracTicketCustom.find_by_sql("SELECT DISTINCT name FROM #{TracTicketCustom.table_name}").each do |field|
-          print '.'
-          STDOUT.flush
+          #print '.' # Maybe not needed this out?
+          #STDOUT.flush
           # Redmine custom field name
           field_name = encode(field.name[0, limit_for(IssueCustomField, 'name')]).humanize
           # Find if the custom already exists in Redmine
@@ -367,7 +361,7 @@ namespace :redmine do
           f.projects << @target_project
           custom_field_map[field.name] = f
         end
-        puts
+        #puts
 
         # Trac 'resolution' field as a Redmine custom field
         r = IssueCustomField.find(:first, :conditions => { :name => "Resolution" })
@@ -401,10 +395,9 @@ namespace :redmine do
         custom_field_map['tracid'] = tid
   
         # Tickets
-        print "Migrating tickets"
+        who = "Migrating tickets"
+          tickets_total = TracTicket.count
           TracTicket.find_each(:batch_size => 200) do |ticket|
-          print '.'
-          STDOUT.flush
           i = Issue.new :project => @target_project,
                           :subject => encode(ticket.summary[0, limit_for(Issue, 'subject')]),
                           :description => encode(ticket.description),
@@ -419,7 +412,7 @@ namespace :redmine do
           next unless Time.fake(ticket.changetime) { i.save }
           TICKET_MAP[ticket.id] = i.id
           migrated_tickets += 1
-
+          simplebar(who, migrated_tickets, tickets_total)
           # Owner
             unless ticket.owner.blank?
               i.assigned_to = find_or_create_user(ticket.owner, true)
@@ -497,17 +490,18 @@ namespace :redmine do
 
         # update issue id sequence if needed (postgresql)
         Issue.connection.reset_pk_sequence!(Issue.table_name) if Issue.connection.respond_to?('reset_pk_sequence!')
-        puts
+        puts if migrated_tickets < tickets_total
 
         # Wiki
-        print "Migrating wiki"
+        who = "Migrating wiki"
         if wiki.save
+          wiki_edits_total = TracWikiPage.count
           TracWikiPage.find(:all, :order => 'name, version').each do |page|
             # Do not migrate Trac manual wiki pages
-            next if TRAC_WIKI_PAGES.include?(page.name)
-            wiki_edit_count += 1
-            print '.'
-            STDOUT.flush
+            if TRAC_WIKI_PAGES.include?(page.name) then
+              wiki_edits_total -= 1
+              next
+            end
             p = wiki.find_or_new_page(page.name)
             p.content = WikiContent.new(:page => p) if p.new_record?
             p.content.text = page.text
@@ -517,7 +511,8 @@ namespace :redmine do
 
             next if p.content.new_record?
             migrated_wiki_edits += 1
-
+            simplebar(who, migrated_wiki_edits, wiki_edits_total)
+            
             # Attachments
             page.attachments.each do |attachment|
               next unless attachment.exist?
@@ -534,70 +529,73 @@ namespace :redmine do
           end
 
         end
-        puts
+        puts if migrated_wiki_edits < wiki_edits_total
 
     # Now load each wiki page and transform its content into textile format
-    print "Transform texts to textile format:"
-    puts
+    puts "\nTransform texts to textile format:"
 
-    print "   in Wiki pages..................."
+    wiki_pages_count = 0
+    issues_desc_count = 0
+    issues_journal_count = 0
+    milestone_wiki_count = 0
+    who = "   in Wiki pages"
           wiki.reload
+
+          wiki_pages_total = wiki.pages.count
           wiki.pages.each do |page|
-            #print '.'
             page.content.text = convert_wiki_text(page.content.text)
             Time.fake(page.content.updated_on) { page.content.save }
+            wiki_pages_count += 1
+            simplebar(who, wiki_pages_count, wiki_pages_total)
           end
-    puts
-
-    print "   in Issue descriptions..........."
+          puts if wiki_pages_count < wiki_pages_total
+          
+    who = "   in Issue descriptions"
+          issues_total = TICKET_MAP.count
           TICKET_MAP.each do |newId|
-
+            issues_desc_count += 1
+            simplebar(who, issues_desc_count, issues_total)
             next if newId.nil?
-            
-            #print '.'
             issue = findIssue(newId)
             next if issue.nil?
-
             issue.description = convert_wiki_text(issue.description)
-      issue.save            
+            issue.save
           end
-    puts
+    puts if issues_desc_count < issues_total
 
-    print "   in Issue journal descriptions..."
+    who = "   in Issue journal descriptions"
           TICKET_MAP.each do |newId|
+            issues_journal_count += 1
+            simplebar(who, issues_journal_count, issues_total)
             next if newId.nil?
-            
-            #print '.'
             issue = findIssue(newId)
             next if issue.nil?
-            
             issue.journals.find(:all).each do |journal|
-              #print '.'
               journal.notes = convert_wiki_text(journal.notes)
               journal.save
             end
-  
           end
-    puts
+    puts if issues_journal_count < issues_total
 
-    print "   in Milestone descriptions......."
+    who = "   in Milestone descriptions"
+          milestone_wiki_total = milestone_wiki.count
           milestone_wiki.each do |name|
+            milestone_wiki_count += 1
+            simplebar(who, milestone_wiki_count, milestone_wiki_total)
             p = wiki.find_page(name)            
             next if p.nil?
-                  
-            #print '.'            
             p.content.text = convert_wiki_text(p.content.text)
             p.content.save
     end
-    puts
+    puts if milestone_wiki_count < milestone_wiki_total
 
         puts
-        puts "Components:      #{migrated_components}/#{TracComponent.count}"
-        puts "Milestones:      #{migrated_milestones}/#{TracMilestone.count}"
-        puts "Tickets:         #{migrated_tickets}/#{TracTicket.count}"
+        puts "Components:      #{migrated_components}/#{components_total}"
+        puts "Milestones:      #{migrated_milestones}/#{milestones_total}"
+        puts "Tickets:         #{migrated_tickets}/#{tickets_total}"
         puts "Ticket files:    #{migrated_ticket_attachments}/" + TracAttachment.count(:conditions => {:type => 'ticket'}).to_s
         puts "Custom values:   #{migrated_custom_values}/#{TracTicketCustom.count}"
-        puts "Wiki edits:      #{migrated_wiki_edits}/#{wiki_edit_count}"
+        puts "Wiki edits:      #{migrated_wiki_edits}/#{wiki_edits_total}"
         puts "Wiki files:      #{migrated_wiki_attachments}/" + TracAttachment.count(:conditions => {:type => 'wiki'}).to_s
       end
       
@@ -786,7 +784,13 @@ namespace :redmine do
 
   desc 'Subversion migration script'
   task :migrate_from_trac_svn => :environment do
-  
+
+    require 'redmine/scm/adapters/abstract_adapter'
+    require 'redmine/scm/adapters/subversion_adapter'
+    require 'rexml/document'
+    require 'uri'
+    require 'tempfile'
+
     module SvnMigrate 
         TICKET_MAP = []
 
@@ -1039,7 +1043,7 @@ namespace :redmine do
         # Ticket number re-writing
         text = text.gsub(/#(\d+)/) do |s|
           if $1.length < 10
-#            ticket_map[$1.to_i] ||= $1
+            #ticket_map[$1.to_i] ||= $1
             "\##{ticket_map[$1.to_i] || $1}"
           else
             s
@@ -1108,6 +1112,23 @@ namespace :redmine do
         text = text.gsub(/\[\[TOC(?:\((.*?)\))?\]\]/m) {|s| "{{>toc}}\n"}
         
         text
+  end
+  
+  # Simple progress bar
+  def simplebar(title, current, total, out = STDOUT)
+    @title = title
+    @current = current
+    @total = total
+    @out = out
+    @max = 60
+    @mark = "*"
+    @title_width = 40
+    @format = "%-#{@title_width}s [%-#{@max}s] %3d%%  %s"
+    @bar = @current * @max / @total
+    percentage = @bar * 100 / @max
+    @current == @total ? eol = "\n" : eol ="\r"
+    printf(@format, @title, @mark * @bar, percentage, eol)
+    @out.flush
   end
 end
 
