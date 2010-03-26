@@ -168,7 +168,7 @@ namespace :redmine do
         has_many :attachments, :class_name => "TracAttachment",
                                :finder_sql => "SELECT DISTINCT attachment.* FROM #{TracMigrate::TracAttachment.table_name}" +
                                               " WHERE #{TracMigrate::TracAttachment.table_name}.type = 'ticket'" +
-                                              ' AND #{TracMigrate::TracAttachment.table_name}.id = \'#{id}\''
+                                              ' AND #{TracMigrate::TracAttachment.table_name}.id = \"#{id}\"'
         has_many :customs, :class_name => "TracTicketCustom", :foreign_key => :ticket
 
         def ticket_type
@@ -208,7 +208,7 @@ namespace :redmine do
         has_many :attachments, :class_name => "TracAttachment",
                                :finder_sql => "SELECT DISTINCT attachment.* FROM #{TracMigrate::TracAttachment.table_name}" +
                                       " WHERE #{TracMigrate::TracAttachment.table_name}.type = 'wiki'" +
-                                      ' AND #{TracMigrate::TracAttachment.table_name}.id = \'#{id}\''
+                                      ' AND #{TracMigrate::TracAttachment.table_name}.id = \"#{id}\"'
 
         def self.columns
           # Hides readonly Trac field to prevent clash with AR readonly? method (Rails 2.0)
@@ -1116,13 +1116,28 @@ namespace :redmine do
   
   # Simple progress bar
   def simplebar(title, current, total, out = STDOUT)
+    def get_width
+      default_width = 80
+      begin
+        tiocgwinsz = 0x5413
+        data = [0, 0, 0, 0].pack("SSSS")
+        if @out.ioctl(tiocgwinsz, data) >= 0 then
+          rows, cols, xpixels, ypixels = data.unpack("SSSS")
+          if cols >= 0 then cols else default_width end
+        else
+          default_width
+        end
+      rescue Exception
+        default_width
+      end
+    end
     @title = title
     @current = current
     @total = total
     @out = out
-    @max = 60
     @mark = "*"
     @title_width = 40
+    @max = get_width - @title_width - 10
     @format = "%-#{@title_width}s [%-#{@max}s] %3d%%  %s"
     @bar = @current * @max / @total
     percentage = @bar * 100 / @max
