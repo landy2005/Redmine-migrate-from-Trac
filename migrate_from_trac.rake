@@ -200,7 +200,7 @@ namespace :redmine do
                            TracReports TracRevisionLog TracRoadmap TracRss TracSearch TracStandalone TracSupport TracSyntaxColoring TracTickets \
                            TracTicketsCustomFields TracTimeline TracUnicode TracUpgrade TracWiki WikiDeletePage WikiFormatting \
                            WikiHtml WikiMacros WikiNewPage WikiPageNames WikiProcessors WikiRestructuredText WikiRestructuredTextLinks \
-                           CamelCase TitleIndex TracNavigation TracFineGrainedPermissions TracWorkflow)
+                           CamelCase TitleIndex TracNavigation TracFineGrainedPermissions TracWorkflow TimingAndEstimationPluginUserManual)
       class TracWikiPage < ActiveRecord::Base
         set_table_name :wiki
         set_primary_key :name
@@ -508,11 +508,11 @@ namespace :redmine do
             p.content.author = find_or_create_user(page.author) unless page.author.blank? || page.author == 'trac'
             p.content.comments = page.comment
             Time.fake(page.time) { p.new_record? ? p.save : p.content.save }
-
-            next if p.content.new_record?
             migrated_wiki_edits += 1
             simplebar(who, migrated_wiki_edits, wiki_edits_total)
-            
+
+            next if p.content.new_record?
+
             # Attachments
             page.attachments.each do |attachment|
               next unless attachment.exist?
@@ -949,10 +949,26 @@ namespace :redmine do
 
   # Basic wiki syntax conversion
   def convert_wiki_text_mapping(text, ticket_map = [])
+        # Hide links
+        def wiki_links_hide(src)
+          @wiki_links = []
+          @wiki_links_hash = "####WIKILINKS#{src.hash.to_s}####"
+          src.gsub(/(\[\[.+?\|.+?\]\])/) do
+            @wiki_links << $1
+            @wiki_links_hash
+          end
+        end
+        # Restore links
+        def wiki_links_restore(src)
+          @wiki_links.each do |s|
+            src = src.sub("#{@wiki_links_hash}", s.to_s)
+          end
+          src
+        end
         # Hidding code blocks
         def code_hide(src)
           @code = []
-          @code_hash = "##CODEBLOCK#{src.hash.to_s}##"
+          @code_hash = "####CODEBLOCK#{src.hash.to_s}####"
           src.gsub(/(\{\{\{.+?\}\}\}|`.+?`)/m) do
             @code << $1
             @code_hash
@@ -1062,13 +1078,18 @@ namespace :redmine do
         #      [wiki:SomeLink Link description],[wiki:SomeLink "Link description"]
         text = text.gsub(/\[wiki\:([^\s\]\"']+?)[\ \t]+([\"']?)(.+?)\2\]/) {|s| "[[#{$1.delete(',./?;|:')}|#{$3}]]"}
 
+        # Before convert CamelCase links, must hide wiki links with description.
+        # Like this: [[http://www.freebsd.org|Hello FreeBSD World]]
+        text = wiki_links_hide(text)
         # Links to CamelCase pages (not work for unicode)
         #      UsingJustWikiCaps,UsingJustWikiCaps/Subpage
         text = text.gsub(/([^!]|^)(^| )([A-Z][a-z]+[A-Z][a-zA-Z]+(?:\/[^\s[:punct:]]+)*)/) {|s| "#{$1}#{$2}[[#{$3.delete('/')}]]"}
         # Normalize things that were supposed to not be links
         # like !NotALink
         text = text.gsub(/(^| )!([A-Z][A-Za-z]+)/, '\1\2')
-
+        # Now restore hidden links
+        text = wiki_links_restore(text)
+        
         # Revisions links
         text = text.gsub(/\[(\d+)\]/, 'r\1')
         # Ticket number re-writing
