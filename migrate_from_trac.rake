@@ -200,7 +200,7 @@ namespace :redmine do
                            TracReports TracRevisionLog TracRoadmap TracRss TracSearch TracStandalone TracSupport TracSyntaxColoring TracTickets \
                            TracTicketsCustomFields TracTimeline TracUnicode TracUpgrade TracWiki WikiDeletePage WikiFormatting \
                            WikiHtml WikiMacros WikiNewPage WikiPageNames WikiProcessors WikiRestructuredText WikiRestructuredTextLinks \
-                           CamelCase TitleIndex)
+                           CamelCase TitleIndex TracNavigation TracFineGrainedPermissions TracWorkflow)
       class TracWikiPage < ActiveRecord::Base
         set_table_name :wiki
         set_primary_key :name
@@ -244,7 +244,7 @@ namespace :redmine do
           end
           name =~ (/(.+?)(?:[\ \t]+(.+)?|[\ \t]+|)$/)
           fn = $1.strip
-          ln = ($2 || '-').strip
+          ln = ($2 || '').strip
 
           u = User.new :mail => mail.gsub(/[^-@a-z0-9\.]/i, '-'),
                        :firstname => fn[0, limit_for(User, 'firstname')].gsub(/[^\w\s\'\-]/i, '-'),
@@ -531,63 +531,54 @@ namespace :redmine do
         end
         puts if migrated_wiki_edits < wiki_edits_total
 
-    # Now load each wiki page and transform its content into textile format
-    puts "\nTransform texts to textile format:"
+        # Now load each wiki page and transform its content into textile format
+        puts "\nTransform texts to textile format:"
+    
+        wiki_pages_count = 0
+        issues_count = 0
+        milestone_wiki_count = 0
 
-    wiki_pages_count = 0
-    issues_desc_count = 0
-    issues_journal_count = 0
-    milestone_wiki_count = 0
-    who = "   in Wiki pages"
-          wiki.reload
-
-          wiki_pages_total = wiki.pages.count
-          wiki.pages.each do |page|
-            page.content.text = convert_wiki_text(page.content.text)
-            Time.fake(page.content.updated_on) { page.content.save }
-            wiki_pages_count += 1
-            simplebar(who, wiki_pages_count, wiki_pages_total)
+        who = "   in Wiki pages"
+        wiki.reload
+        wiki_pages_total = wiki.pages.count
+        wiki.pages.each do |page|
+          page.content.text = convert_wiki_text(page.content.text)
+          Time.fake(page.content.updated_on) { page.content.save }
+          wiki_pages_count += 1
+          simplebar(who, wiki_pages_count, wiki_pages_total)
+        end
+        puts if wiki_pages_count < wiki_pages_total
+        
+        who = "   in Issues"
+        issues_total = TICKET_MAP.count
+        TICKET_MAP.each do |newId|
+          issues_count += 1
+          simplebar(who, issues_count, issues_total)
+          next if newId.nil?
+          issue = findIssue(newId)
+          next if issue.nil?
+          # convert issue description
+          issue.description = convert_wiki_text(issue.description)
+          issue.save
+          # convert issue journals
+          issue.journals.find(:all).each do |journal|
+            journal.notes = convert_wiki_text(journal.notes)
+            journal.save
           end
-          puts if wiki_pages_count < wiki_pages_total
-          
-    who = "   in Issue descriptions"
-          issues_total = TICKET_MAP.count
-          TICKET_MAP.each do |newId|
-            issues_desc_count += 1
-            simplebar(who, issues_desc_count, issues_total)
-            next if newId.nil?
-            issue = findIssue(newId)
-            next if issue.nil?
-            issue.description = convert_wiki_text(issue.description)
-            issue.save
-          end
-    puts if issues_desc_count < issues_total
+        end
+        puts if issues_count < issues_total
 
-    who = "   in Issue journal descriptions"
-          TICKET_MAP.each do |newId|
-            issues_journal_count += 1
-            simplebar(who, issues_journal_count, issues_total)
-            next if newId.nil?
-            issue = findIssue(newId)
-            next if issue.nil?
-            issue.journals.find(:all).each do |journal|
-              journal.notes = convert_wiki_text(journal.notes)
-              journal.save
-            end
-          end
-    puts if issues_journal_count < issues_total
-
-    who = "   in Milestone descriptions"
-          milestone_wiki_total = milestone_wiki.count
-          milestone_wiki.each do |name|
-            milestone_wiki_count += 1
-            simplebar(who, milestone_wiki_count, milestone_wiki_total)
-            p = wiki.find_page(name)            
-            next if p.nil?
-            p.content.text = convert_wiki_text(p.content.text)
-            p.content.save
-    end
-    puts if milestone_wiki_count < milestone_wiki_total
+        who = "   in Milestone descriptions"
+        milestone_wiki_total = milestone_wiki.count
+        milestone_wiki.each do |name|
+          milestone_wiki_count += 1
+          simplebar(who, milestone_wiki_count, milestone_wiki_total)
+          p = wiki.find_page(name)            
+          next if p.nil?
+          p.content.text = convert_wiki_text(p.content.text)
+          p.content.save
+        end
+        puts if milestone_wiki_count < milestone_wiki_total
 
         puts
         puts "Components:      #{migrated_components}/#{components_total}"
@@ -600,14 +591,10 @@ namespace :redmine do
       end
       
       def self.findIssue(id)
-        
         return Issue.find(id)
-
       rescue ActiveRecord::RecordNotFound
-  puts
-        print "[#{id}] not found"
-
-        nil      
+        puts "[#{id}] not found"
+        nil
       end
       
       def self.limit_for(klass, attribute)
@@ -748,17 +735,6 @@ namespace :redmine do
     break unless STDIN.gets.match(/^y$/i)
     puts
 
-    def prompt(text, options = {}, &block)
-      default = options[:default] || ''
-      while true
-        print "#{text} [#{default}]: "
-        STDOUT.flush
-        value = STDIN.gets.chomp!
-        value = default if value.blank?
-        break if yield value
-      end
-    end
-
     DEFAULT_PORTS = {'mysql' => 3306, 'postgresql' => 5432}
 
     prompt('Trac directory') {|directory| TracMigrate.set_trac_directory directory.strip}
@@ -804,8 +780,6 @@ namespace :redmine do
         end
         
         class SvnExtendedAdapter < Redmine::Scm::Adapters::SubversionAdapter
-        
-
 
             def set_message(path=nil, revision=nil, msg=nil)
               path ||= ''
@@ -912,7 +886,7 @@ namespace :redmine do
         
         # Basic wiki syntax conversion
         def self.convert_wiki_text(text)
-          convert_wiki_text_mapping(text, TICKET_MAP )
+          convert_wiki_text_mapping(text, TICKET_MAP)
         end
         
         def self.set_svn_url(url)
@@ -935,16 +909,6 @@ namespace :redmine do
           @scm ||= SvnExtendedAdapter.new @@svn_url, @@svn_url, @@svn_username, @@svn_password, 0, "", nil
           @scm
         end
-    end
-    
-    def prompt(text, options = {}, &block)
-      default = options[:default] || ''
-      while true
-        print "#{text} [#{default}]: "
-        value = STDIN.gets.chomp!
-        value = default if value.blank?
-        break if yield value
-      end
     end
 
     puts
@@ -971,9 +935,76 @@ namespace :redmine do
     
   end
 
+  # Prompt
+  def prompt(text, options = {}, &block)
+    default = options[:default] || ''
+    while true
+      print "#{text} [#{default}]: "
+      STDOUT.flush
+      value = STDIN.gets.chomp!
+      value = default if value.blank?
+      break if yield value
+    end
+  end
 
   # Basic wiki syntax conversion
   def convert_wiki_text_mapping(text, ticket_map = [])
+        # Hidding code blocks
+        def code_hide(src)
+          @code = []
+          @code_hash = "##CODEBLOCK#{src.hash.to_s}##"
+          src.gsub(/(\{\{\{.+?\}\}\}|`.+?`)/m) do
+            @code << $1
+            @code_hash
+          end
+        end
+        # Convert code blocks
+        def code_convert(src)
+          @code.each do |s|
+            s = s.to_s
+            if s =~ (/`(.+?)`/m) || s =~ (/\{\{\{(.+?)\}\}\}/) then
+              # inline code
+              s = s.replace("@#{$1}@")
+            else
+              # We would like to convert the Code highlighting too
+              # This will go into the next line.
+              shebang_line = false
+              # Reguar expression for start of code
+              pre_re = /\{\{\{/
+              # Code hightlighing...
+              shebang_re = /^\#\!([a-z]+)/
+              # Regular expression for end of code
+              pre_end_re = /\}\}\}/
+      
+              # Go through the whole text..extract it line by line
+              s = s.gsub(/^(.*)$/) do |line|
+                m_pre = pre_re.match(line)
+                if m_pre
+                  line = '<pre>'
+                else
+                  m_sl = shebang_re.match(line)
+                  if m_sl
+                    shebang_line = true
+                    line = '<code class="' + m_sl[1] + '">'
+                  end
+                  m_pre_end = pre_end_re.match(line)
+                  if m_pre_end
+                    line = '</pre>'
+                    if shebang_line
+                      line = '</code>' + line
+                    end
+                  end
+                end
+                line
+              end
+            end
+            src = src.sub("#{@code_hash}", s)
+          end
+          src
+        end
+
+        # Hide code blocks
+        text = code_hide(text)
         # New line
         text = text.gsub(/\[\[[Bb][Rr]\]\]/, "\n") # This has to go before the rules below
         # Titles (only h1. to h6., and remove #...)
@@ -1050,42 +1081,6 @@ namespace :redmine do
           end
         end
         
-        # Before convert Code highlighting, need processing inline code
-        #      {{{hello world}}}
-        text = text.gsub(/\{\{\{(.+?)\}\}\}/, '@\1@')
-        
-        # We would like to convert the Code highlighting too
-        # This will go into the next line.
-        shebang_line = false
-        # Reguar expression for start of code
-        pre_re = /\{\{\{/
-        # Code hightlighing...
-        shebang_re = /^\#\!([a-z]+)/
-        # Regular expression for end of code
-        pre_end_re = /\}\}\}/
-
-        # Go through the whole text..extract it line by line
-        text = text.gsub(/^(.*)$/) do |line|
-          m_pre = pre_re.match(line)
-          if m_pre
-            line = '<pre>'
-          else
-            m_sl = shebang_re.match(line)
-            if m_sl
-              shebang_line = true
-              line = '<code class="' + m_sl[1] + '">'
-            end
-            m_pre_end = pre_end_re.match(line)
-            if m_pre_end
-              line = '</pre>'
-              if shebang_line
-                line = '</code>' + line
-              end
-            end
-          end
-          line
-        end
-
         # Highlighting
         text = text.gsub(/'''''([^\s])/, '_*\1')
         text = text.gsub(/([^\s])'''''/, '\1*_')
@@ -1093,7 +1088,6 @@ namespace :redmine do
         text = text.gsub(/''/, '_')
         text = text.gsub(/__/, '+')
         text = text.gsub(/~~/, '-')
-        text = text.gsub(/`/, '@')
         text = text.gsub(/,,/, '~')
         # Tables
         text = text.gsub(/\|\|/, '|')
@@ -1108,9 +1102,12 @@ namespace :redmine do
         #                  * [[Image(htdocs:picture.gif)]] (referring to a file inside project htdocs)
         #                  * [[Image(source:/trunk/trac/htdocs/trac_logo_mini.png)]] (a file in repository) 
         text = text.gsub(/\[\[image\((.+?)(?:,.+?)?\)\]\]/i, '!\1!')
-        # TOC
+        # TOC (is right-aligned, because that in Trac)
         text = text.gsub(/\[\[TOC(?:\((.*?)\))?\]\]/m) {|s| "{{>toc}}\n"}
-        
+
+        # Restore and convert code blocks
+        text = code_convert(text)
+
         text
   end
   
@@ -1121,7 +1118,7 @@ namespace :redmine do
       begin
         tiocgwinsz = 0x5413
         data = [0, 0, 0, 0].pack("SSSS")
-        if @out.ioctl(tiocgwinsz, data) >= 0 then
+        if out.ioctl(tiocgwinsz, data) >= 0 then
           rows, cols, xpixels, ypixels = data.unpack("SSSS")
           if cols >= 0 then cols else default_width end
         else
@@ -1131,19 +1128,15 @@ namespace :redmine do
         default_width
       end
     end
-    @title = title
-    @current = current
-    @total = total
-    @out = out
-    @mark = "*"
-    @title_width = 40
-    @max = get_width - @title_width - 10
-    @format = "%-#{@title_width}s [%-#{@max}s] %3d%%  %s"
-    @bar = @current * @max / @total
-    percentage = @bar * 100 / @max
-    @current == @total ? eol = "\n" : eol ="\r"
-    printf(@format, @title, @mark * @bar, percentage, eol)
-    @out.flush
+    mark = "*"
+    title_width = 40
+    max = get_width - title_width - 10
+    format = "%-#{title_width}s [%-#{max}s] %3d%%  %s"
+    bar = current * max / total
+    percentage = bar * 100 / max
+    current == total ? eol = "\n" : eol ="\r"
+    printf(format, title, mark * bar, percentage, eol)
+    out.flush
   end
 end
 
