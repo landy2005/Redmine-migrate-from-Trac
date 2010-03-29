@@ -9,3 +9,69 @@ rake redmine:migrate_from_trac_svn RAILS_ENV="production"
 
 Additional information is on the link:
 http://www.redmine.org/issues/5035
+
+Tests:
+---
+# RAILS_ENV="production" script/about
+
+About your application's environment
+Ruby version              1.8.7 (x86_64-linux)
+RubyGems version          1.3.4
+Rack version              1.0
+Rails version             2.3.5
+Active Record version     2.3.5
+Active Resource version   2.3.5
+Action Mailer version     2.3.5
+Active Support version    2.3.5
+Application root          /home/redmine-trunk
+Environment               production
+Database adapter          postgresql
+Database schema version   20100323105501
+---
+
+   Trac -> DB:      sqlite3
+          Charset:  UTF-8
+          Language: Russian
+          
+Redmine -> DB:    postgresql, mysql
+           Charset: UTF-8
+
+migrate project1:
+---
+Migrating components                     [******************************] 100%  
+Migrating milestones                     [******************************] 100%  
+Migrating tickets                        [******************************] 100%  
+Migrating wiki                           [******************************] 100%  
+
+Transform texts to textile format:
+   in Wiki pages                         [******************************] 100%  
+   in Issues                             [******************************] 100%  
+   in Milestone descriptions             [******************************] 100%  
+
+Components:      7/7
+Milestones:      17/17
+Tickets:         565/565
+Ticket files:    49/49
+Custom values:   2344/2344
+Wiki edits:      308/308
+Wiki files:      6/6
+
+migrate project2:
+---
+Migrating components                     [******************************] 100%  
+Migrating milestones                     [******************************] 100%  
+Migrating tickets                        [******************************] 100%  
+Migrating wiki                           [******************************] 100%  
+
+Transform texts to textile format:
+   in Wiki pages                         [******************************] 100%  
+   in Issues                             [******************************] 100%  
+   in Milestone descriptions             [******************************] 100%  
+
+Components:      23/23
+Milestones:      35/35
+Tickets:         2203/2203
+Ticket files:    262/263
+Custom values:   4200/4200
+Wiki edits:      4380/4380
+Wiki files:      36/75
