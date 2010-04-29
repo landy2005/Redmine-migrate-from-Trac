@@ -200,7 +200,8 @@ namespace :redmine do
                            TracReports TracRevisionLog TracRoadmap TracRss TracSearch TracStandalone TracSupport TracSyntaxColoring TracTickets \
                            TracTicketsCustomFields TracTimeline TracUnicode TracUpgrade TracWiki WikiDeletePage WikiFormatting \
                            WikiHtml WikiMacros WikiNewPage WikiPageNames WikiProcessors WikiRestructuredText WikiRestructuredTextLinks \
-                           CamelCase TitleIndex TracNavigation TracFineGrainedPermissions TracWorkflow TimingAndEstimationPluginUserManual)
+                           CamelCase TitleIndex TracNavigation TracFineGrainedPermissions TracWorkflow TimingAndEstimationPluginUserManual \
+                           PageTemplates)
       class TracWikiPage < ActiveRecord::Base
         set_table_name :wiki
         set_primary_key :name
@@ -289,7 +290,7 @@ namespace :redmine do
         migrated_wiki_edits = 0
         migrated_wiki_attachments = 0
 
-        #Wiki system initializing...
+        # Wiki system initializing...
         @target_project.wiki.destroy if @target_project.wiki
         @target_project.reload
         wiki = Wiki.new(:project => @target_project, :start_page => 'WikiStart')
@@ -302,7 +303,7 @@ namespace :redmine do
         TracComponent.find(:all).each do |component|
           c = IssueCategory.new :project => @target_project,
                                 :name => encode(component.name[0, limit_for(IssueCategory, 'name')])
-        #Owner
+        # Owner
         unless component.owner.blank?
           c.assigned_to = find_or_create_user(component.owner, true)
         end
@@ -1114,7 +1115,7 @@ namespace :redmine do
         text = text.gsub(/\|\|/, '|')
         # Lists:
         #      bullet
-        text = text.gsub(/^(\ +)\* /) {|s| '*' * $1.length + " "}
+        text = text.gsub(/^(\ +)[\*-] /) {|s| '*' * $1.length + " "}
         #      numbered
         text = text.gsub(/^(\ +)\d+\. /) {|s| '#' * $1.length + " "}
         # Images (work for only attached in current page [[Image(picture.gif)]])
